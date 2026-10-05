@@ -1,0 +1,87 @@
+name: Mise à jour EDT
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Télécharger et filtrer l'EDT
+        env:
+          ADE_URL: ${{ secrets.ADE_URL }}
+        run: |
+          python - <<'PY'
+          import os
+          import urllib.request
+
+          url = os.environ["ADE_URL"]
+
+          data = urllib.request.urlopen(url).read().decode("utf-8")
+
+          events = data.split("BEGIN:VEVENT")
+
+          header = events[0]
+          kept = []
+
+          excluded_subjects = [
+              "G - Instruments & méthodes 2 Théodolites et stations totales",
+              "G - Topographie 2",
+              "G - Topométrie 3",
+              "GT2E - Dynamique des fluides",
+              "GT2E - Génie climatique - Hydronique des réseaux 1",
+          ]
+
+          for event in events[1:]:
+              block = "BEGIN:VEVENT" + event
+
+              summary = ""
+              for line in block.splitlines():
+                  if line.startswith("SUMMARY:"):
+                      summary = line[len("SUMMARY:"):]
+                      break
+
+              # Supprimer les cours GrB seuls
+              if "GrB" in summary and "GrA" not in summary:
+                  continue
+
+              # Supprimer les 5 matières choisies
+              if any(subject in summary for subject in excluded_subjects):
+                  continue
+
+              kept.append(block)
+
+          result = header + "".join(kept)
+
+          with open(
+              "EDT_filtre_GrA_sans_GrB_et_matieres.ics",
+              "w",
+              encoding="utf-8",
+              newline=""
+          ) as f:
+              f.write(result)
+
+          print("Événements conservés :", len(kept))
+          PY
+
+      - name: Enregistrer la modification
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add EDT_filtre_GrA_sans_GrB_et_matieres.ics
+          git commit -m "Mise à jour automatique de l'EDT" || echo "Aucune modification"
+          git push
